@@ -137,9 +137,10 @@ class LocationNetwork(nn.Module):
 
         locations = F.tanh(mu + noise).detach()
 
+        # mu = [batch size, 2]
         # locations = [batch size, 2]
 
-        return locations
+        return mu, locations
 
 class CoreNetwork(nn.Module):
     def __init__(self, glimpse_hid_dim, locations_hid_dim, recurrent_hid_dim):
