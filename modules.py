@@ -112,14 +112,15 @@ class GlimpseNetwork(nn.Module):
 
         # locations = [batch size, glimpse hid dim + locations hid dim]
 
-        out = F.relu(glimpse + locations)
+        glimpse_hidden = F.relu(glimpse + locations)
 
-        # out = [batch size, glimpse hid dim + locations hid dim]
+        # glimpse_hidden = [batch size, glimpse hid dim + locations hid dim]
 
-        return out
+        return glimpse_hidden
 
 class LocationNetwork(nn.Module):
     def __init__(self, recurrent_hidden_dim, std):
+        super().__init__()
 
         self.std = std
         self.fc = nn.Linear(recurrent_hidden_dim, 2)
@@ -128,6 +129,9 @@ class LocationNetwork(nn.Module):
 
         # hidden = [batch size, hidden dim]
 
+        # potentially this should be torch.clamp(self.fc(recurrent_hidden), -1, +1).detach()
+        # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
+        # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L75
         mu = F.tanh(self.fc(recurrent_hidden))
 
         # mu = [batch size, hidden dim]
@@ -135,6 +139,9 @@ class LocationNetwork(nn.Module):
         noise = torch.zeros_like(mu)
         noise.data.normal_(std=self.std)
 
+        # potentially this should be torch.clamp(mu + noise, -1, +1).detach()
+        # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
+        # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L82
         locations = F.tanh(mu + noise).detach()
 
         # mu = [batch size, 2]
@@ -144,14 +151,52 @@ class LocationNetwork(nn.Module):
 
 class CoreNetwork(nn.Module):
     def __init__(self, glimpse_hid_dim, locations_hid_dim, recurrent_hid_dim):
+        super().__init__()
 
         self.i2h = nn.Linear(glimpse_hid_dim+locations_hid_dim, recurrent_hid_dim)
         self.h2h = nn.Linear(recurrent_hid_dim, recurrent_hid_dim) 
 
     def forward(self, glimpse_hidden, recurrent_hidden):
 
+        # glimpse_hidden = [batch size, glimpse_hid_dim+locations_hid_dim]
+        # recurrent_hidden = [batch size, recurrent_hid_dim]
+
         glimpse_hidden = self.i2h(glimpse_hidden)
         recurrent_hidden = self.h2h(recurrent_hidden)
-        recurrent_hidden = F.relu(glimpse_hidden, recurrent_hidden)
+        recurrent_hidden = F.relu(glimpse_hidden + recurrent_hidden)
+
+        # recurrent_hidden = [batch size, recurrent_hid_dim]
 
         return recurrent_hidden
+
+class ActionNetwork(nn.Module):
+    def __init__(self, recurrent_hid_dim, output_dim):
+        super().__init__()
+
+        self.fc = nn.Linear(recurrent_hid_dim, output_dim)
+
+    def forward(self, recurrent_hidden):
+
+        # recurrent_hidden = [batch size, recurrent hid dim]
+
+        action_logits = self.fc(recurrent_hidden)
+
+        # action_logits = [batch size, output dim]
+
+        return action_logits
+
+class CriticNetwork(nn.Module):
+    def __init__(self, recurrent_hid_dim):
+        super().__init__()
+
+        self.fc = nn.Linear(recurrent_hid_dim, 1)
+
+    def forward(self, recurrent_hidden):
+
+        # recurrent_hidden = [batch size, recurrent hid dim]
+
+        baseline = self.fc(recurrent_hidden)
+
+        # baseline = [batch size, 1]
+
+        return baseline
