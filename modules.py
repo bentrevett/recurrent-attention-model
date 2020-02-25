@@ -118,37 +118,6 @@ class GlimpseNetwork(nn.Module):
 
         return glimpse_hidden
 
-class LocationNetwork(nn.Module):
-    def __init__(self, recurrent_hidden_dim, std):
-        super().__init__()
-
-        self.std = std
-        self.fc = nn.Linear(recurrent_hidden_dim, 2)
-
-    def forward(self, recurrent_hidden):
-
-        # hidden = [batch size, hidden dim]
-
-        # potentially this should be torch.clamp(self.fc(recurrent_hidden), -1, +1).detach()
-        # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
-        # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L75
-        mu = F.tanh(self.fc(recurrent_hidden))
-
-        # mu = [batch size, hidden dim]
-
-        noise = torch.zeros_like(mu)
-        noise.data.normal_(std=self.std)
-
-        # potentially this should be torch.clamp(mu + noise, -1, +1).detach()
-        # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
-        # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L82
-        locations = F.tanh(mu + noise).detach()
-
-        # mu = [batch size, 2]
-        # locations = [batch size, 2]
-
-        return mu, locations
-
 class CoreNetwork(nn.Module):
     def __init__(self, glimpse_hid_dim, locations_hid_dim, recurrent_hid_dim):
         super().__init__()
@@ -168,6 +137,37 @@ class CoreNetwork(nn.Module):
         # recurrent_hidden = [batch size, recurrent_hid_dim]
 
         return recurrent_hidden
+
+class LocationNetwork(nn.Module):
+    def __init__(self, recurrent_hidden_dim, std):
+        super().__init__()
+
+        self.std = std
+        self.fc = nn.Linear(recurrent_hidden_dim, 2)
+
+    def forward(self, recurrent_hidden):
+
+        # hidden = [batch size, hidden dim]
+
+        # potentially this should be torch.clamp(self.fc(recurrent_hidden), -1, +1).detach()
+        # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
+        # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L75
+        locations_mu = F.tanh(self.fc(recurrent_hidden))
+
+        # mu = [batch size, hidden dim]
+
+        noise = torch.zeros_like(locations_mu)
+        noise.data.normal_(std=self.std)
+
+        # potentially this should be torch.clamp(mu + noise, -1, +1).detach()
+        # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
+        # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L82
+        locations_noise = F.tanh(locations_mu + noise).detach()
+
+        # locations_noise = [batch size, 2]
+        # locations_mu = [batch size, 2]
+
+        return locations_mu, locations_noise
 
 class ActionNetwork(nn.Module):
     def __init__(self, recurrent_hid_dim, output_dim):
