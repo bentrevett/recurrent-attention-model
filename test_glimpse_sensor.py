@@ -73,11 +73,11 @@ n_patches = 3
 scale = 2
 glimpse_sensor = modules.GlimpseSensor(patch_size, n_patches, scale)
 
-# coords, [0,0] implies centre of the image
-coords = torch.zeros(batch_size, 2)
+# locations, [0,0] implies centre of the image
+locations = torch.zeros(batch_size, 2)
 
 # put images through glimpse sensor, making it return list of pytorch tensor images
-x = glimpse_sensor.get_patches(images, coords, return_images=True)
+x = glimpse_sensor.get_patches(images, locations, return_images=True)
 
 # plot all patches for each of the batch of images
 for i, _x in enumerate(x):

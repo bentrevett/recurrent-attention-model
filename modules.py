@@ -3,30 +3,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class GlimpseSensor:
-    def __init__(self, size, n_patches, scale):
+    def __init__(self, patch_size, n_patches, scale):
 
-        self.patch_size = size # size of patch
+        self.patch_size = patch_size # size of patch
         self.n_patches = n_patches # number of patches
         self.scale = scale # size of subsequent patches
 
-    def get_patches(self, images, coords, return_images=False):
+    def get_patches(self, images, locations, return_images=False):
 
         # images = [batch size, n channels, height, width]
-        # coords = [batch size, 2]
+        # locations = [batch size, 2]
         # if return_images == True, returns list of downsampled patches
 
         _, _, height, width = images.shape
 
-        assert height == width, f'Only works on square images, got [{height},{width}]'
-        assert torch.max(coords).item() <= 1.0, 'Coords must be between [-1,+1]'
-        assert torch.min(coords).item() >= -1, 'Coords must be between [-1,+1]'
+        assert height == width, f'only works on square images, got [{height},{width}]'
+        assert torch.max(locations).item() <= 1.0, 'locations must be between [-1,+1]'
+        assert torch.min(locations).item() >= -1, 'locations must be between [-1,+1]'
 
         patches = []
         size = self.patch_size
 
         # extract `n_patches` that get bigger by `scale` each time
         for i in range(self.n_patches):
-            patch = self.get_patch(images, coords, size)
+            patch = self.get_patch(images, locations, size)
             patches.append(patch)
             size = int(size * self.scale)
 
@@ -43,16 +43,16 @@ class GlimpseSensor:
 
         patches = patches.view(patches.shape[0], -1)
 
-        # patches = [batch, n_patches*n_channels*height*width]
+        # patches = [batch, n_patches*n_channels*patch_size*patch_size]
 
         return patches
 
-    def get_patch(self, images, coords, size):
+    def get_patch(self, images, locations, size):
 
         batch_size, _, height, _ = images.shape
 
-        # convert `coords` from [-1, 1] to [0, height]
-        coords = (0.5 * ((coords + 1.0) * height)).long()
+        # convert `locations` from [-1, 1] to [0, height]
+        locations = (0.5 * ((locations + 1.0) * height)).long()
 
         # how much padding for the (left, right, top, bottom)
         pad_dims = (
@@ -63,8 +63,8 @@ class GlimpseSensor:
         # pad images
         images = F.pad(images, pad_dims, 'replicate')
 
-        # patch x, y coords
-        from_x, from_y = coords[:, 0], coords[:, 1]
+        # patch x, y locations
+        from_x, from_y = locations[:, 0], locations[:, 1]
         to_x, to_y = from_x + size, from_y + size
 
         patches = []
@@ -76,3 +76,44 @@ class GlimpseSensor:
         patches = torch.cat(patches)
 
         return patches
+
+class GlimpseNetwork(nn.Module):
+    def __init__(self, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, locations_hid_dim):
+        super().__init__()
+
+        self.glimpse_sensor = GlimpseSensor(patch_size, n_patches, scale)
+        self.fc_glimpse = nn.Linear(n_patches*n_channels*patch_size*patch_size, glimpse_hid_dim)
+        self.fc_glimpse_out = nn.Linear(locations_hid_dim, glimpse_hid_dim+locations_hid_dim)
+        self.fc_locations = nn.Linear(2, locations_hid_dim)
+        self.fc_locations_out = nn.Linear(locations_hid_dim, glimpse_hid_dim+locations_hid_dim)
+
+    def forward(self, images, locations):
+
+        # images = [batch size, n channels, height, width]
+        # locations = [batch size, 2]
+
+        glimpse = self.glimpse_sensor.get_patches(images, locations)
+
+        # glimpse = [batch size, n_patches*n_channels*patch_size*patch_size]
+
+        glimpse = F.relu(self.fc_glimpse(glimpse))
+
+        # glimpse = [batch size, glimpse hid dim]
+
+        glimpse = self.fc_glimpse_out(glimpse)
+
+        # glimpse = [batch size, glimpse hid dim + locations hid dim]
+
+        locations = F.relu(self.fc_locations(locations))
+
+        # locations = [batch size, locations hid dim]
+
+        locations = self.fc_locations_out(locations)
+
+        # locations = [batch size, glimpse hid dim + locations hid dim]
+
+        out = F.relu(glimpse + locations)
+
+        # out = [batch size, glimpse hid dim + locations hid dim]
+
+        return out
