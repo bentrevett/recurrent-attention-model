@@ -117,3 +117,40 @@ class GlimpseNetwork(nn.Module):
         # out = [batch size, glimpse hid dim + locations hid dim]
 
         return out
+
+class LocationNetwork(nn.Module):
+    def __init__(self, recurrent_hidden_dim, std):
+
+        self.std = std
+        self.fc = nn.Linear(recurrent_hidden_dim, 2)
+
+    def forward(self, recurrent_hidden):
+
+        # hidden = [batch size, hidden dim]
+
+        mu = F.tanh(self.fc(recurrent_hidden))
+
+        # mu = [batch size, hidden dim]
+
+        noise = torch.zeros_like(mu)
+        noise.data.normal_(std=self.std)
+
+        locations = F.tanh(mu + noise).detach()
+
+        # locations = [batch size, 2]
+
+        return locations
+
+class CoreNetwork(nn.Module):
+    def __init__(self, glimpse_hid_dim, locations_hid_dim, recurrent_hid_dim):
+
+        self.i2h = nn.Linear(glimpse_hid_dim+locations_hid_dim, recurrent_hid_dim)
+        self.h2h = nn.Linear(recurrent_hid_dim, recurrent_hid_dim) 
+
+    def forward(self, glimpse_hidden, recurrent_hidden):
+
+        glimpse_hidden = self.i2h(glimpse_hidden)
+        recurrent_hidden = self.h2h(recurrent_hidden)
+        recurrent_hidden = F.relu(glimpse_hidden, recurrent_hidden)
+
+        return recurrent_hidden
