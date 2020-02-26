@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-import modules
+from modules.glimpse_network import GlimpseNetwork
 
 root = 'data'
 
@@ -44,14 +44,14 @@ n_channels = 1
 patch_size = 8
 n_patches = 3
 scale = 2
-locations_hid_dim = 128
+location_hid_dim = 128
 glimpse_hid_dim = 128
-glimpse_network = modules.GlimpseNetwork(n_channels, patch_size, n_patches, scale, glimpse_hid_dim, locations_hid_dim)
+glimpse_network = GlimpseNetwork(n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim)
 
 # coords, [0,0] implies centre of the image
-locations = torch.zeros(batch_size, 2)
+location = torch.zeros(batch_size, 2)
 
 # put images through glimpse network
-x = glimpse_network(images, locations)
+x = glimpse_network(images, location)
 
-assert x.shape == (batch_size, glimpse_hid_dim + locations_hid_dim)
+assert x.shape == (batch_size, glimpse_hid_dim + location_hid_dim)

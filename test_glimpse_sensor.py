@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-import modules
+from modules.glimpse_sensor import GlimpseSensor
 
 def save_images(images, labels, name):
 
@@ -72,16 +72,23 @@ save_images(X, labels, 'images/raw')
 patch_size = 8
 n_patches = 3
 scale = 2
-glimpse_sensor = modules.GlimpseSensor(patch_size, n_patches, scale)
+glimpse_sensor = GlimpseSensor(patch_size, n_patches, scale)
 
-# locations, [0,0] implies centre of the image
-locations = torch.zeros(batch_size, 2)
+# location, [0,0] implies centre of the image
+location = torch.zeros(batch_size, 2)
 
 # put images through glimpse sensor, making it return list of pytorch tensor images
-x = glimpse_sensor.get_patches(images, locations, return_images=True)
+x = glimpse_sensor.get_patches(images, location, return_images=True)
 
 # plot all patches for each of the batch of images
 for i, _x in enumerate(x):
     X = _x.cpu().numpy()
     X = np.transpose(X, [0,2,3,1])
     save_images(X, labels, f'images/patch_{i}')
+
+# test shape of output
+x = glimpse_sensor.get_patches(images, location)
+
+n_channels = 1
+
+assert x.shape == (batch_size, n_patches*n_channels*patch_size*patch_size)
