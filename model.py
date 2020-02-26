@@ -75,6 +75,7 @@ class RecurrentAttentionModel(nn.Module):
         if location is None:
             location = torch.FloatTensor(batch_size, 2).uniform_(-1, +1)
         else:
+            assert len(location.shape) == 2 and location.shape[-1] == 2
             assert torch.max(location).item() <= 1.0, 'location x and y must be between [-1,+1]'
             assert torch.min(location).item() >= -1, 'location x and y must be between [-1,+1]'
 
