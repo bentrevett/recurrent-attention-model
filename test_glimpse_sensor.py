@@ -81,10 +81,12 @@ location = torch.zeros(batch_size, 2)
 x = glimpse_sensor.get_patches(images, location, return_images=True)
 
 # plot all patches for each of the batch of images
+s = 1
 for i, _x in enumerate(x):
     X = _x.cpu().numpy()
     X = np.transpose(X, [0,2,3,1])
-    save_images(X, labels, f'images/patch_{i}')
+    save_images(X, labels, f'images/patch_{i+1}_scale_{s}')
+    s *= scale
 
 # test shape of output
 x = glimpse_sensor.get_patches(images, location)

@@ -4,13 +4,13 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 
 from modules.glimpse_network import GlimpseNetwork
-from modules.core_network import CoreNetwork
+from modules.core_network import RNNCoreNetwork, LSTMCoreNetwork
 from modules.location_network import LocationNetwork
 from modules.action_network import ActionNetwork
 from modules.baseline_network import BaselineNetwork
 
 class RecurrentAttentionModel(nn.Module):
-    def __init__(self, n_glimpses, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim, recurrent_hid_dim, std, output_dim):
+    def __init__(self, n_glimpses, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim, recurrent_hid_dim, std, output_dim, recurrence_type):
         super().__init__()
 
         assert n_glimpses >= 1
@@ -23,17 +23,22 @@ class RecurrentAttentionModel(nn.Module):
         assert glimpse_hid_dim + location_hid_dim == recurrent_hid_dim
         assert std >= 0
         assert output_dim >= 2
+        assert recurrence_type in ['rnn', 'lstm']
 
         self.n_glimpses = n_glimpses
         self.std = std
+        self.recurrence_type = recurrence_type
 
         self.glimpse_network = GlimpseNetwork(n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim)
-        self.core_network = CoreNetwork(glimpse_hid_dim, location_hid_dim, recurrent_hid_dim)
+        if self.recurrence_type == 'lstm':
+            self.core_network = LSTMCoreNetwork(glimpse_hid_dim, location_hid_dim, recurrent_hid_dim)
+        else:
+            self.core_network = RNNCoreNetwork(glimpse_hid_dim, location_hid_dim, recurrent_hid_dim)
         self.location_network = LocationNetwork(recurrent_hid_dim)
         self.action_network = ActionNetwork(recurrent_hid_dim, output_dim)
         self.baseline_network = BaselineNetwork(recurrent_hid_dim)
 
-        self.recurrent_hidden = nn.Parameter(torch.zeros(1, recurrent_hid_dim))
+        self.recurrent_hidden = torch.zeros(1, recurrent_hid_dim)
 
     def step(self, image, location, recurrent_hidden, std):
 
@@ -41,11 +46,17 @@ class RecurrentAttentionModel(nn.Module):
         # location = [batch size, 2]
         # recurrent_hidden = [batch size, recurrent hid dim]
 
+        if self.recurrence_type == 'lstm':
+            recurrent_hidden, recurrent_cell = recurrent_hidden
+
         glimpse_hidden = self.glimpse_network(image, location)
 
         # glimpse_hidden = [batch size, glimpse hid dim + location hid dim]
 
-        recurrent_hidden = self.core_network(glimpse_hidden, recurrent_hidden)
+        if self.recurrence_type == 'lstm':
+            recurrent_hidden, recurrent_cell = self.core_network(glimpse_hidden, recurrent_hidden, recurrent_cell)
+        else:
+            recurrent_hidden = self.core_network(glimpse_hidden, recurrent_hidden)
 
         # recurrent_hidden = [batch size, recurrent hid dim]
 
@@ -64,16 +75,19 @@ class RecurrentAttentionModel(nn.Module):
 
         # log_location_action = [batch size]
 
+        if self.recurrence_type == 'lstm':
+            recurrent_hidden = (recurrent_hidden, recurrent_cell)
+
         return recurrent_hidden, location_noise, baseline, log_location_action
 
-    def forward(self, image, location=None, std=None):
+    def forward(self, image, device, location=None, std=None):
 
         assert len(image.shape) == 4
 
         batch_size = image.shape[0]
 
         if location is None:
-            location = torch.FloatTensor(batch_size, 2).uniform_(-1, +1)
+            location = torch.FloatTensor(batch_size, 2).uniform_(-1, +1).to(device)
         else:
             assert len(location.shape) == 2 and location.shape[-1] == 2
             assert torch.max(location).item() <= 1.0, 'location x and y must be between [-1,+1]'
@@ -87,7 +101,11 @@ class RecurrentAttentionModel(nn.Module):
         # images = [batch size, n channels, height, width]
         # location = [batch size, 2]
 
-        recurrent_hidden = self.recurrent_hidden.repeat(batch_size, 1)
+        recurrent_hidden = self.recurrent_hidden.repeat(batch_size, 1).to(device)
+
+        if self.recurrence_type == 'lstm':
+            recurrent_cell = self.recurrent_hidden.repeat(batch_size, 1).to(device)
+            recurrent_hidden = (recurrent_hidden, recurrent_cell)
 
         locations = []
         baselines = []
@@ -98,6 +116,9 @@ class RecurrentAttentionModel(nn.Module):
             locations.append(location)
             baselines.append(baseline)
             log_location_actions.append(log_location_action)
+
+        if self.recurrence_type == 'lstm':
+            recurrent_hidden, recurrent_cell = recurrent_hidden
 
         log_classifier_actions = F.log_softmax(self.action_network(recurrent_hidden), dim=1)
         locations = torch.stack(locations, dim=1)
