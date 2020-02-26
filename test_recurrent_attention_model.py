@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-import modules
+import model
 
 root = 'data'
 
@@ -40,18 +40,30 @@ data_iter = iter(data_loader)
 images, labels = data_iter.next()
 
 # create glimpse sensor module
+n_glimpses = 6
 n_channels = 1
 patch_size = 8
-n_patches = 3
-scale = 2
-locations_hid_dim = 128
+n_patches = 1
+scale = 1
 glimpse_hid_dim = 128
-glimpse_network = modules.GlimpseNetwork(n_channels, patch_size, n_patches, scale, glimpse_hid_dim, locations_hid_dim)
+locations_hid_dim = 128
+recurrent_hid_dim = 256
+std = 0.1
+output_dim = 10
+ram = model.RecurrentAttentionModel(n_glimpses, n_channels, patch_size, 
+                                    n_patches, scale, glimpse_hid_dim, 
+                                    locations_hid_dim, recurrent_hid_dim, 
+                                    std, output_dim)
+
+#_glimpses, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, locations_hid_dim, recurrent_hid_dim, std, output_dim)
 
 # coords, [0,0] implies centre of the image
 locations = torch.zeros(batch_size, 2)
 
 # put images through glimpse network
-x = glimpse_network(images, locations)
+log_classifier_actions, log_locations_actions, baselines, locations = ram(images)
 
-assert x.shape == (batch_size, glimpse_hid_dim + locations_hid_dim)
+print(log_classifier_actions.shape)
+print(log_locations_actions.shape)
+print(baselines.shape)
+print(locations.shape)

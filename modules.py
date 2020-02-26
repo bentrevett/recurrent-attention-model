@@ -9,24 +9,24 @@ class GlimpseSensor:
         self.n_patches = n_patches # number of patches
         self.scale = scale # size of subsequent patches
 
-    def get_patches(self, images, locations, return_images=False):
+    def get_patches(self, image, location, return_images=False):
 
-        # images = [batch size, n channels, height, width]
-        # locations = [batch size, 2]
+        # image = [batch size, n channels, height, width]
+        # location = [batch size, 2]
         # if return_images == True, returns list of downsampled patches
 
-        _, _, height, width = images.shape
+        _, _, height, width = image.shape
 
         assert height == width, f'only works on square images, got [{height},{width}]'
-        assert torch.max(locations).item() <= 1.0, 'locations must be between [-1,+1]'
-        assert torch.min(locations).item() >= -1, 'locations must be between [-1,+1]'
+        assert torch.max(location).item() <= 1.0, 'location x and y must be between [-1,+1]'
+        assert torch.min(location).item() >= -1, 'location x and y must be between [-1,+1]'
 
         patches = []
         size = self.patch_size
 
         # extract `n_patches` that get bigger by `scale` each time
         for i in range(self.n_patches):
-            patch = self.get_patch(images, locations, size)
+            patch = self.get_patch(image, location, size)
             patches.append(patch)
             size = int(size * self.scale)
 
@@ -47,12 +47,12 @@ class GlimpseSensor:
 
         return patches
 
-    def get_patch(self, images, locations, size):
+    def get_patch(self, image, location, size):
 
-        batch_size, _, height, _ = images.shape
+        batch_size, _, height, _ = image.shape
 
-        # convert `locations` from [-1, 1] to [0, height]
-        locations = (0.5 * ((locations + 1.0) * height)).long()
+        # convert `location` from [-1, 1] to [0, height]
+        location = (0.5 * ((location + 1.0) * height)).long()
 
         # how much padding for the (left, right, top, bottom)
         pad_dims = (
@@ -61,38 +61,38 @@ class GlimpseSensor:
                     )
         
         # pad images
-        images = F.pad(images, pad_dims, 'replicate')
+        image = F.pad(image, pad_dims, 'replicate')
 
-        # patch x, y locations
-        from_x, from_y = locations[:, 0], locations[:, 1]
+        # patch x, y location
+        from_x, from_y = location[:, 0], location[:, 1]
         to_x, to_y = from_x + size, from_y + size
 
         patches = []
         
         # get patches from padded images
         for i in range(batch_size):
-            patches.append(images[i, :, from_y[i]:to_y[i], from_x[i]:to_x[i]].unsqueeze(0))
+            patches.append(image[i, :, from_y[i]:to_y[i], from_x[i]:to_x[i]].unsqueeze(0))
 
         patches = torch.cat(patches)
 
         return patches
 
 class GlimpseNetwork(nn.Module):
-    def __init__(self, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, locations_hid_dim):
+    def __init__(self, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim):
         super().__init__()
 
         self.glimpse_sensor = GlimpseSensor(patch_size, n_patches, scale)
         self.fc_glimpse = nn.Linear(n_patches*n_channels*patch_size*patch_size, glimpse_hid_dim)
-        self.fc_glimpse_out = nn.Linear(locations_hid_dim, glimpse_hid_dim+locations_hid_dim)
-        self.fc_locations = nn.Linear(2, locations_hid_dim)
-        self.fc_locations_out = nn.Linear(locations_hid_dim, glimpse_hid_dim+locations_hid_dim)
+        self.fc_glimpse_out = nn.Linear(location_hid_dim, glimpse_hid_dim+location_hid_dim)
+        self.fc_location = nn.Linear(2, location_hid_dim)
+        self.fc_location_out = nn.Linear(location_hid_dim, glimpse_hid_dim+location_hid_dim)
 
-    def forward(self, images, locations):
+    def forward(self, image, location):
 
-        # images = [batch size, n channels, height, width]
-        # locations = [batch size, 2]
+        # image = [batch size, n channels, height, width]
+        # location = [batch size, 2]
 
-        glimpse = self.glimpse_sensor.get_patches(images, locations)
+        glimpse = self.glimpse_sensor.get_patches(image, location)
 
         # glimpse = [batch size, n_patches*n_channels*patch_size*patch_size]
 
@@ -102,32 +102,32 @@ class GlimpseNetwork(nn.Module):
 
         glimpse = self.fc_glimpse_out(glimpse)
 
-        # glimpse = [batch size, glimpse hid dim + locations hid dim]
+        # glimpse = [batch size, glimpse hid dim + location hid dim]
 
-        locations = F.relu(self.fc_locations(locations))
+        location = F.relu(self.fc_location(location))
 
-        # locations = [batch size, locations hid dim]
+        # location = [batch size, location hid dim]
 
-        locations = self.fc_locations_out(locations)
+        location = self.fc_location_out(location)
 
-        # locations = [batch size, glimpse hid dim + locations hid dim]
+        # location = [batch size, glimpse hid dim + location hid dim]
 
-        glimpse_hidden = F.relu(glimpse + locations)
+        glimpse_hidden = F.relu(glimpse + location)
 
-        # glimpse_hidden = [batch size, glimpse hid dim + locations hid dim]
+        # glimpse_hidden = [batch size, glimpse hid dim + location hid dim]
 
         return glimpse_hidden
 
 class CoreNetwork(nn.Module):
-    def __init__(self, glimpse_hid_dim, locations_hid_dim, recurrent_hid_dim):
+    def __init__(self, glimpse_hid_dim, location_hid_dim, recurrent_hid_dim):
         super().__init__()
 
-        self.i2h = nn.Linear(glimpse_hid_dim+locations_hid_dim, recurrent_hid_dim)
+        self.i2h = nn.Linear(glimpse_hid_dim+location_hid_dim, recurrent_hid_dim)
         self.h2h = nn.Linear(recurrent_hid_dim, recurrent_hid_dim) 
 
     def forward(self, glimpse_hidden, recurrent_hidden):
 
-        # glimpse_hidden = [batch size, glimpse_hid_dim+locations_hid_dim]
+        # glimpse_hidden = [batch size, glimpse_hid_dim+location_hid_dim]
         # recurrent_hidden = [batch size, recurrent_hid_dim]
 
         glimpse_hidden = self.i2h(glimpse_hidden)
@@ -152,22 +152,22 @@ class LocationNetwork(nn.Module):
         # potentially this should be torch.clamp(self.fc(recurrent_hidden), -1, +1).detach()
         # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
         # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L75
-        locations_mu = F.tanh(self.fc(recurrent_hidden))
+        location_mu = F.tanh(self.fc(recurrent_hidden))
 
         # mu = [batch size, hidden dim]
 
-        noise = torch.zeros_like(locations_mu)
+        noise = torch.zeros_like(location_mu)
         noise.data.normal_(std=self.std)
 
         # potentially this should be torch.clamp(mu + noise, -1, +1).detach()
         # https://github.com/kevinzakka/recurrent-visual-attention/issues/12
         # https://github.com/hehefan/Recurrent-Attention-Model/blob/master/model.py#L82
-        locations_noise = F.tanh(locations_mu + noise).detach()
+        location_noise = F.tanh(location_mu + noise).detach()
 
-        # locations_noise = [batch size, 2]
-        # locations_mu = [batch size, 2]
+        # location_noise = [batch size, 2]
+        # location_mu = [batch size, 2]
 
-        return locations_mu, locations_noise
+        return location_mu, location_noise
 
 class ActionNetwork(nn.Module):
     def __init__(self, recurrent_hid_dim, output_dim):
@@ -185,7 +185,7 @@ class ActionNetwork(nn.Module):
 
         return action_logits
 
-class CriticNetwork(nn.Module):
+class BaselineNetwork(nn.Module):
     def __init__(self, recurrent_hid_dim):
         super().__init__()
 

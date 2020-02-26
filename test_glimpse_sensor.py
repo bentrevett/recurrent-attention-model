@@ -3,8 +3,9 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import numpy as np
 import matplotlib.pyplot as plt
-import modules
 import os
+
+import modules
 
 def save_images(images, labels, name):
 
