@@ -1,16 +1,16 @@
 import torch
 from torch.utils import data
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 import torchvision.datasets as datasets
+from PIL import Image
 
-def get_MNIST(batch_size, root='data'):
-
-    root = 'data'
+def get_data(which, batch_size, root='data'):
 
     # get train data
-    train_data = datasets.MNIST(root=root, 
-                                train=True, 
-                                download=True)
+    train_data = getattr(datasets, which)(root=root, 
+                                          train=True, 
+                                          download=True)
 
     # calculate mean and std on train data
     mean = train_data.data.float().mean() / 255
@@ -24,72 +24,54 @@ def get_MNIST(batch_size, root='data'):
                         ])
 
     # get train data w/ transforms
-    train_data = datasets.MNIST(root=root, 
-                                train=True, 
-                                download=True,
-                                transform=data_transforms)
-
-    test_data = datasets.MNIST(root=root, 
-                               train=False, 
-                               download=True,
-                               transform=data_transforms)
-
-    train_iterator = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    test_iterator = data.DataLoader(test_data, batch_size=batch_size)
-
-    return train_iterator, test_iterator
-
-def get_fashion_MNIST(batch_size, root='data'):
-
-    root = 'data'
-
-    # get train data
-    train_data = datasets.FashionMNIST(root=root, 
-                                       train=True, 
-                                       download=True)
-
-    # calculate mean and std on train data
-    mean = train_data.data.float().mean() / 255
-    std = train_data.data.float().std() / 255
-
-    # define transforms
-    data_transforms = transforms.Compose([
-                        transforms.ToTensor(),
-                        transforms.Normalize(mean=[mean], 
-                                             std=[std])
-                        ])
-
-    # get train data w/ transforms
-    train_data = datasets.FashionMNIST(root=root, 
-                                       train=True, 
-                                       download=True,
-                                       transform=data_transforms)
+    train_data = getattr(datasets, which)(root=root, 
+                                          train=True, 
+                                          download=True,
+                                          transform=data_transforms)
 
     # get test data w/ transforms
-    test_data = datasets.FashionMNIST(root=root, 
-                                      train=False, 
-                                      download=True,
-                                      transform=data_transforms)
+    test_data = getattr(datasets, which)(root=root, 
+                                         train=False, 
+                                         download=True,
+                                         transform=data_transforms)
 
+    # load train and test iterators
     train_iterator = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_iterator = data.DataLoader(test_data, batch_size=batch_size)
 
     return train_iterator, test_iterator
 
-def get_KMNIST(batch_size, root='data'):
+def get_translated_data(which, translated_size, batch_size, root='data'):
 
-    root = 'data'
+    # hard coded for MNIST style datasets
+    image_size = 28
+
+    # define transform that does nothing
+    data_transforms = transforms.Compose([
+                        transforms.ToTensor(),
+                        ])
 
     # get train data
-    train_data = datasets.KMNIST(root=root, 
-                                 train=True, 
-                                 download=True)
+    train_data = getattr(datasets, which)(root=root, 
+                                          train=True, 
+                                          download=True,
+                                          transform=data_transforms)
 
-    # calculate mean and std on train data
-    mean = train_data.data.float().mean() / 255
-    std = train_data.data.float().std() / 255
+    # create collator
+    collator = TranslatedCollator(image_size, translated_size)
 
-    # define transforms
+    # create iterator
+    train_iterator = data.DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=collator.collate)
+
+    # stack all images in giant tensor
+    images = [image for image, label in train_iterator]
+    images = torch.cat(images, dim=0)
+
+    #get mean and std
+    mean = images.mean()
+    std = images.std()
+
+    # define transforms with normalization
     data_transforms = transforms.Compose([
                         transforms.ToTensor(),
                         transforms.Normalize(mean=[mean], 
@@ -97,18 +79,37 @@ def get_KMNIST(batch_size, root='data'):
                         ])
 
     # get train data w/ transforms
-    train_data = datasets.KMNIST(root=root, 
-                                 train=True, 
-                                 download=True,
-                                 transform=data_transforms)
+    train_data = getattr(datasets, which)(root=root, 
+                                          train=True, 
+                                          download=True,
+                                          transform=data_transforms)
 
     # get test data w/ transforms
-    test_data = datasets.KMNIST(root=root, 
-                                train=False, 
-                                download=True,
-                                transform=data_transforms)
+    test_data = getattr(datasets, which)(root=root, 
+                                         train=False, 
+                                         download=True,
+                                         transform=data_transforms)
 
-    train_iterator = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    test_iterator = data.DataLoader(test_data, batch_size=batch_size)
+    # load collator
+    collator = TranslatedCollator(image_size, translated_size)
+
+    # load train and test iterators
+    train_iterator = data.DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=collator.collate)
+    test_iterator = data.DataLoader(test_data, batch_size=batch_size, collate_fn=collator.collate)
 
     return train_iterator, test_iterator
+
+class TranslatedCollator:
+    def __init__(self, image_size, translated_size):
+        self.image_size = image_size
+        self.translated_size = translated_size
+
+    def collate(self, batch):
+        images, labels = zip(*batch)
+        batch_size = len(images)
+        background = torch.zeros(batch_size, 1, self.translated_size, self.translated_size)
+        image_pos = torch.randint(0, self.translated_size-self.image_size, (batch_size, 2))
+        for i, image in enumerate(images):
+            background[i,:,image_pos[i][1]:image_pos[i][1]+self.image_size,image_pos[i][1]:image_pos[i][1]+self.image_size] = image
+        labels = torch.LongTensor(labels)
+        return background, labels

@@ -7,14 +7,14 @@ import matplotlib.animation as animation
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data', type=str, default='mnist')
+parser.add_argument('--name', type=str, required=True)
 parser.add_argument('--n_to_plot', type=int, default=10)
 args = parser.parse_args()
 
-images = torch.load(f'checkpoints/{args.data}-images.pt')
-predictions = torch.load(f'checkpoints/{args.data}-predictions.pt')
-locations = torch.load(f'checkpoints/{args.data}-locations.pt')
-params = torch.load(f'checkpoints/{args.data}-params.pt')
+images = torch.load(f'checkpoints/{args.name}-images.pt')
+predictions = torch.load(f'checkpoints/{args.name}-predictions.pt')
+locations = torch.load(f'checkpoints/{args.name}-locations.pt')
+params = torch.load(f'checkpoints/{args.name}-params.pt')
 patch_size = params['patch_size']
 n_patches = params['n_patches']
 scale = params['scale']
@@ -70,5 +70,5 @@ def update_image(i):
 anim = animation.FuncAnimation(
     fig, update_image, frames=n_glimpses, interval=500, repeat=True)
 
-name = f'images/{args.data}.mp4'
+name = f'images/{args.name}.mp4'
 anim.save(name, extra_args=['-vcodec', 'h264', '-pix_fmt', 'yuv420p'])

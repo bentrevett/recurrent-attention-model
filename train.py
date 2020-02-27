@@ -17,7 +17,8 @@ os.makedirs('checkpoints', exist_ok=True)
 parser = argparse.ArgumentParser()
 
 # training set-up
-parser.add_argument('--data', type=str, default='mnist')
+parser.add_argument('--data', type=str, default='MNIST')
+parser.add_argument('--translated_size', type=int, default=None)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--n_epochs', type=int, default=250)
 parser.add_argument('--train_rollouts', type=int, default=1)
@@ -35,13 +36,17 @@ parser.add_argument('--recurrent_hid_dim', type=int, default=256)
 parser.add_argument('--std', type=float, default=0.17)
 
 # other hyperparameters
-parser.add_argument('--lr', type=float, default=0.001)
-parser.add_argument('--momentum', type=float, default=0.9)
+parser.add_argument('--lr', type=float, default=3e-4)
 
 args = parser.parse_args()
 
 if args.seed is None:
     args.seed = random.randint(0, 1000)
+
+name = f'{args.data}'
+if args.translated_size is not None:
+    name += f'-ts{args.translated_size}'
+name += f'-ng{args.n_glimpses}-ps{args.patch_size}-np{args.n_patches}-s{args.seed}'
 
 print(vars(args))
 
@@ -49,20 +54,15 @@ torch.manual_seed(args.seed)
 random.seed(args.seed)
 np.random.seed(args.seed)
 
-if args.data == 'mnist':
-    train_iterator, test_iterator = data_loader.get_MNIST(args.batch_size)
-    n_channels = 1
-    output_dim = 10
-elif args.data == 'fashion-mnist':
-    train_iterator, test_iterator = data_loader.get_fashion_MNIST(args.batch_size)
-    n_channels = 1
-    output_dim = 10
-elif args.data == 'kmnist':
-    train_iterator, test_iterator = data_loader.get_KMNIST(args.batch_size)
+if args.data in {'MNIST', 'KMNIST', 'FashionMNIST'}:
+    if args.translated_size is not None:
+        train_iterator, test_iterator = data_loader.get_translated_data(args.data, args.translated_size, args.batch_size)
+    else:
+        train_iterator, test_iterator = data_loader.get_data(args.data, args.batch_size)
     n_channels = 1
     output_dim = 10
 else:
-    raise ValueError(f'--data must be one of [mnist, fashion-mnist, kmnist], got: {args.data}')
+    raise ValueError(f'{args.data} not a recognized dataset.')
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -81,7 +81,7 @@ model = model.RecurrentAttentionModel(args.n_glimpses,
 
 model = model.to(device)
 
-optimizer = optim.Adam(model.parameters(), lr=3e-4)
+optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -249,12 +249,12 @@ for epoch in range(1, args.n_epochs+1):
 
     if loss < best_test_loss:
         best_test_loss = loss
-        torch.save(model.state_dict(), f'checkpoints/{args.data}-model.pt')
+        torch.save(model.state_dict(), f'checkpoints/{name}-model.pt')
         images, predictions, locations = sample_glimpses(model, test_iterator, device)
-        torch.save(images, f'checkpoints/{args.data}-images.pt')
-        torch.save(predictions, f'checkpoints/{args.data}-predictions.pt')
-        torch.save(locations, f'checkpoints/{args.data}-locations.pt')
+        torch.save(images, f'checkpoints/{name}-images.pt')
+        torch.save(predictions, f'checkpoints/{name}-predictions.pt')
+        torch.save(locations, f'checkpoints/{name}-locations.pt')
         params = {'patch_size': args.patch_size, 
                   'n_patches': args.n_patches,
                   'scale': args.scale}
-        torch.save(params, f'checkpoints/{args.data}-params.pt')
+        torch.save(params, f'checkpoints/{name}-params.pt')
