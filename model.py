@@ -4,13 +4,13 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 
 from modules.glimpse_network import GlimpseNetwork
-from modules.core_network import RNNCoreNetwork, LSTMCoreNetwork
+from modules.core_network import CoreNetwork
 from modules.location_network import LocationNetwork
 from modules.action_network import ActionNetwork
 from modules.baseline_network import BaselineNetwork
 
 class RecurrentAttentionModel(nn.Module):
-    def __init__(self, n_glimpses, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim, recurrent_hid_dim, std, output_dim, recurrence_type):
+    def __init__(self, n_glimpses, n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim, recurrent_hid_dim, std, output_dim):
         super().__init__()
 
         assert n_glimpses >= 1
@@ -21,66 +21,49 @@ class RecurrentAttentionModel(nn.Module):
         assert glimpse_hid_dim >= 1
         assert location_hid_dim >= 1
         assert glimpse_hid_dim + location_hid_dim == recurrent_hid_dim
-        assert std >= 0
+        assert std > 0
         assert output_dim >= 2
-        assert recurrence_type in ['rnn', 'lstm']
 
         self.n_glimpses = n_glimpses
         self.std = std
-        self.recurrence_type = recurrence_type
 
         self.glimpse_network = GlimpseNetwork(n_channels, patch_size, n_patches, scale, glimpse_hid_dim, location_hid_dim)
-        if self.recurrence_type == 'lstm':
-            self.core_network = LSTMCoreNetwork(glimpse_hid_dim, location_hid_dim, recurrent_hid_dim)
-        else:
-            self.core_network = RNNCoreNetwork(glimpse_hid_dim, location_hid_dim, recurrent_hid_dim)
-        self.location_network = LocationNetwork(recurrent_hid_dim)
+        self.core_network = CoreNetwork(glimpse_hid_dim, location_hid_dim, recurrent_hid_dim)
+        self.location_network = LocationNetwork(recurrent_hid_dim, std)
         self.action_network = ActionNetwork(recurrent_hid_dim, output_dim)
         self.baseline_network = BaselineNetwork(recurrent_hid_dim)
 
         self.recurrent_hidden = torch.zeros(1, recurrent_hid_dim)
 
-    def step(self, image, location, recurrent_hidden, std):
+    def step(self, image, location, recurrent_hidden):
 
         # image = [batch size, n channels, height, width]
         # location = [batch size, 2]
         # recurrent_hidden = [batch size, recurrent hid dim]
 
-        if self.recurrence_type == 'lstm':
-            recurrent_hidden, recurrent_cell = recurrent_hidden
-
         glimpse_hidden = self.glimpse_network(image, location)
 
         # glimpse_hidden = [batch size, glimpse hid dim + location hid dim]
 
-        if self.recurrence_type == 'lstm':
-            recurrent_hidden, recurrent_cell = self.core_network(glimpse_hidden, recurrent_hidden, recurrent_cell)
-        else:
-            recurrent_hidden = self.core_network(glimpse_hidden, recurrent_hidden)
+        recurrent_hidden = self.core_network(glimpse_hidden, recurrent_hidden)
 
         # recurrent_hidden = [batch size, recurrent hid dim]
 
-        location_mu, location_noise = self.location_network(recurrent_hidden, std)
+        location, location_mu = self.location_network(recurrent_hidden)
 
+        # location = [batch size, 2]
         # location_mu = [batch size, 2]
-        # location_noise = [batch size, 2]
 
-        baseline = self.baseline_network(recurrent_hidden)
-
-        # baseline = [batch size, 1]
-
-        log_location_action = Normal(location_mu, std).log_prob(location_noise)
-
+        log_location_action = Normal(location_mu, self.std).log_prob(location)
         log_location_action = log_location_action.sum(dim=1)
 
         # log_location_action = [batch size]
 
-        if self.recurrence_type == 'lstm':
-            recurrent_hidden = (recurrent_hidden, recurrent_cell)
+        baseline = self.baseline_network(recurrent_hidden)
 
-        return recurrent_hidden, location_noise, baseline, log_location_action
+        return recurrent_hidden, log_location_action, baseline, location, location_mu, 
 
-    def forward(self, image, device, location=None, std=None):
+    def forward(self, image, device, location=None, train=True):
 
         assert len(image.shape) == 4
 
@@ -93,36 +76,26 @@ class RecurrentAttentionModel(nn.Module):
             assert torch.max(location).item() <= 1.0, 'location x and y must be between [-1,+1]'
             assert torch.min(location).item() >= -1, 'location x and y must be between [-1,+1]'
 
-        if std is None:
-            std = self.std
-        else:
-            assert std >= 0
-
         # images = [batch size, n channels, height, width]
         # location = [batch size, 2]
 
         recurrent_hidden = self.recurrent_hidden.repeat(batch_size, 1).to(device)
 
-        if self.recurrence_type == 'lstm':
-            recurrent_cell = self.recurrent_hidden.repeat(batch_size, 1).to(device)
-            recurrent_hidden = (recurrent_hidden, recurrent_cell)
-
-        locations = []
-        baselines = []
         log_location_actions = []
+        baselines = []
+        locations_mu = []
 
         for t in range(self.n_glimpses):
-            recurrent_hidden, location, baseline, log_location_action = self.step(image, location, recurrent_hidden, std)
-            locations.append(location)
-            baselines.append(baseline)
+            recurrent_hidden, log_location_action, baseline, location, location_mu  = self.step(image, location, recurrent_hidden)
             log_location_actions.append(log_location_action)
+            baselines.append(baseline)
+            locations_mu.append(location_mu)
+            if not train:
+                location = location_mu
 
-        if self.recurrence_type == 'lstm':
-            recurrent_hidden, recurrent_cell = recurrent_hidden
-
-        log_classifier_actions = F.log_softmax(self.action_network(recurrent_hidden), dim=1)
-        locations = torch.stack(locations, dim=1)
-        baselines = torch.stack(baselines, dim=1)
+        log_classifier_actions = F.log_softmax(self.action_network(recurrent_hidden), dim=-1)
         log_location_actions = torch.stack(log_location_actions, dim=1)
+        baselines = torch.stack(baselines, dim=1)
+        locations_mu = torch.stack(locations_mu, dim=1)
 
-        return log_classifier_actions, log_location_actions, baselines, locations
+        return log_classifier_actions, log_location_actions, baselines, locations_mu

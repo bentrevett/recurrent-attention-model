@@ -12,6 +12,7 @@ parser.add_argument('--n_to_plot', type=int, default=10)
 args = parser.parse_args()
 
 images = torch.load(f'checkpoints/{args.data}-images.pt')
+predictions = torch.load(f'checkpoints/{args.data}-predictions.pt')
 locations = torch.load(f'checkpoints/{args.data}-locations.pt')
 params = torch.load(f'checkpoints/{args.data}-params.pt')
 patch_size = params['patch_size']
@@ -27,14 +28,11 @@ _, n_glimpses, _ = locations.shape
 n_to_plot = min(args.n_to_plot, batch_size)
 
 images = images[:n_to_plot]
+predictions = predictions[:n_to_plot]
 locations = locations[:n_to_plot]
 
-print(locations)
-
 # convert locations from [-1, +1] to [0, height]
-locations = (0.5 * ((locations + 1.0) * height)).long()
-
-print(locations)
+locations = (0.5 * ((locations + 1.0) * height))
 
 fig, axes = plt.subplots(nrows=1, ncols=n_to_plot)
 
@@ -44,6 +42,8 @@ images = images.squeeze()
 
 for i, ax in enumerate(axes.flat):
     ax.imshow(images[i], cmap="Greys_r")
+    xlabel = f'{predictions[i]}'
+    ax.set_xlabel(xlabel)
     ax.set_xticks([])
     ax.set_yticks([])
 

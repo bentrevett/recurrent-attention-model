@@ -20,9 +20,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--data', type=str, default='mnist')
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--n_epochs', type=int, default=250)
-parser.add_argument('--train_rollouts', type=int, default=5)
+parser.add_argument('--train_rollouts', type=int, default=1)
 parser.add_argument('--test_rollouts', type=int, default=10)
-parser.add_argument('--seed', type=int, default=1)
+parser.add_argument('--seed', type=int, default=None)
 
 # model hyperparameters
 parser.add_argument('--n_glimpses', type=int, default=6)
@@ -33,7 +33,6 @@ parser.add_argument('--glimpse_hid_dim', type=int, default=128)
 parser.add_argument('--location_hid_dim', type=int, default=128)
 parser.add_argument('--recurrent_hid_dim', type=int, default=256)
 parser.add_argument('--std', type=float, default=0.17)
-parser.add_argument('--recurrence_type', type=str, default='rnn')
 
 # other hyperparameters
 parser.add_argument('--lr', type=float, default=0.001)
@@ -41,16 +40,29 @@ parser.add_argument('--momentum', type=float, default=0.9)
 
 args = parser.parse_args()
 
+if args.seed is None:
+    args.seed = random.randint(0, 1000)
+
+print(vars(args))
+
 torch.manual_seed(args.seed)
 random.seed(args.seed)
 np.random.seed(args.seed)
 
-if args.data.lower() == 'mnist':
+if args.data == 'mnist':
     train_iterator, test_iterator = data_loader.get_MNIST(args.batch_size)
     n_channels = 1
     output_dim = 10
+elif args.data == 'fashion-mnist':
+    train_iterator, test_iterator = data_loader.get_fashion_MNIST(args.batch_size)
+    n_channels = 1
+    output_dim = 10
+elif args.data == 'kmnist':
+    train_iterator, test_iterator = data_loader.get_KMNIST(args.batch_size)
+    n_channels = 1
+    output_dim = 10
 else:
-    raise ValueError(f'--data must be one of [mnist], got: {args.data}')
+    raise ValueError(f'--data must be one of [mnist, fashion-mnist, kmnist], got: {args.data}')
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -65,8 +77,7 @@ model = model.RecurrentAttentionModel(args.n_glimpses,
                                       args.location_hid_dim,
                                       args.recurrent_hid_dim,
                                       args.std,
-                                      output_dim,
-                                      args.recurrence_type)
+                                      output_dim)
 
 model = model.to(device)
 
@@ -98,22 +109,25 @@ def train(model, iterator, optimizer, n_rollouts, device):
 
         optimizer.zero_grad()
 
-        log_classifier_actions, log_location_actions, baselines, locations = model(images, device)
+        log_classifier_actions, log_location_actions, baseline, _ = model(images, device, train=True)
 
         log_classifier_actions = log_classifier_actions.view(n_rollouts, batch_size, -1).mean(dim=0)
         log_location_actions = log_location_actions.view(n_rollouts, batch_size, -1).mean(dim=0)
-        baselines = baselines.view(n_rollouts, batch_size, -1).mean(dim=0)
+        baseline = baseline.view(n_rollouts, batch_size, -1).mean(dim=0)
 
         predictions = torch.argmax(log_classifier_actions, dim=-1)
 
-        rewards = (predictions == labels).float()
+        rewards = (predictions.detach() == labels).float()
 
-        rewards = rewards.unsqueeze(1).repeat(1, args.n_glimpses)
+        n_glimpses = baseline.shape[-1]
+
+        rewards = rewards.unsqueeze(1).repeat(1, n_glimpses)
 
         classifier_loss = F.nll_loss(log_classifier_actions, labels)
-        baseline_loss = F.mse_loss(baselines.squeeze(-1), rewards)
+        baseline_loss = F.mse_loss(baseline.squeeze(-1), rewards)
 
-        advantage = rewards - baselines.squeeze(-1).detach()
+        advantage = rewards - baseline.squeeze(-1).detach()
+        
         reinforce_loss = torch.sum(-log_location_actions * advantage, dim=1)
         reinforce_loss = torch.mean(reinforce_loss, dim=0)
 
@@ -159,22 +173,25 @@ def evaluate(model, iterator, n_rollouts, device):
         images = images.to(device)
         labels = labels.to(device)
 
-        log_classifier_actions, log_location_actions, baselines, locations = model(images, device)
+        log_classifier_actions, log_location_actions, baseline, _ = model(images, device, train=False)
 
         log_classifier_actions = log_classifier_actions.view(n_rollouts, batch_size, -1).mean(dim=0)
         log_location_actions = log_location_actions.view(n_rollouts, batch_size, -1).mean(dim=0)
-        baselines = baselines.view(n_rollouts, batch_size, -1).mean(dim=0)
+        baseline = baseline.view(n_rollouts, batch_size, -1).mean(dim=0)
 
         predictions = torch.argmax(log_classifier_actions, dim=-1)
 
-        rewards = (predictions == labels).float()
+        rewards = (predictions.detach() == labels).float()
 
-        rewards = rewards.unsqueeze(1).repeat(1, args.n_glimpses)
+        n_glimpses = baseline.shape[-1]
+
+        rewards = rewards.unsqueeze(1).repeat(1, n_glimpses)
 
         classifier_loss = F.nll_loss(log_classifier_actions, labels)
-        baseline_loss = F.mse_loss(baselines.squeeze(-1), rewards)
+        baseline_loss = F.mse_loss(baseline.squeeze(-1), rewards)
 
-        advantage = rewards - baselines.squeeze(-1).detach()
+        advantage = rewards - baseline.squeeze(-1).detach()
+        
         reinforce_loss = torch.sum(-log_location_actions * advantage, dim=1)
         reinforce_loss = torch.mean(reinforce_loss, dim=0)
 
@@ -203,11 +220,15 @@ def sample_glimpses(model, iterator, device):
 
     for images, _ in iterator:
 
+        batch_size = images.shape[0]
+
         images = images.to(device)
 
-        _, _, _, locations = model(images, device, std=1e-10)
+        log_classifier_actions, _, _, locations = model(images, device, train=False)
 
-        return images, locations
+        predictions = torch.argmax(log_classifier_actions, dim=-1)
+
+        return images, predictions, locations 
 
 best_test_loss = float('inf')
 
@@ -229,8 +250,9 @@ for epoch in range(1, args.n_epochs+1):
     if loss < best_test_loss:
         best_test_loss = loss
         torch.save(model.state_dict(), f'checkpoints/{args.data}-model.pt')
-        images, locations = sample_glimpses(model, test_iterator, device)
+        images, predictions, locations = sample_glimpses(model, test_iterator, device)
         torch.save(images, f'checkpoints/{args.data}-images.pt')
+        torch.save(predictions, f'checkpoints/{args.data}-predictions.pt')
         torch.save(locations, f'checkpoints/{args.data}-locations.pt')
         params = {'patch_size': args.patch_size, 
                   'n_patches': args.n_patches,

@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.functional as F
 
 class BaselineNetwork(nn.Module):
     def __init__(self, recurrent_hid_dim):
@@ -10,7 +11,7 @@ class BaselineNetwork(nn.Module):
 
         # recurrent_hidden = [batch size, recurrent hid dim]
 
-        baseline = self.fc(recurrent_hidden)
+        baseline = F.relu(self.fc(recurrent_hidden))
 
         # baseline = [batch size, 1]
 
