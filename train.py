@@ -240,7 +240,7 @@ def sample_glimpses(model, iterator, device):
         return images, predictions, locations 
 
 patience_counter = 0
-best_test_loss = float('inf')
+best_test_accuracy = 0
 
 for epoch in range(1, args.n_epochs+1):
 
@@ -263,17 +263,15 @@ for epoch in range(1, args.n_epochs+1):
     with open(f'checkpoints/{name}/test_results.txt', 'a+') as f:
         f.write(f'{accuracy}\t{loss}\t{classifier_loss}\t{baseline_loss}\t{reinforce_loss}\n')
 
-    if loss < best_test_loss:
+    if accuracy > best_test_accuracy:
         patience_counter = 0
-        best_test_loss = loss
+        best_test_accuracy = accuracy
         torch.save(model.state_dict(), f'checkpoints/{name}/model.pt')
         images, predictions, locations = sample_glimpses(model, test_iterator, device)
         torch.save(images, f'checkpoints/{name}/images.pt')
         torch.save(predictions, f'checkpoints/{name}/predictions.pt')
         torch.save(locations, f'checkpoints/{name}/locations.pt')
-        params = vars(args)
-        torch.save(params, f'checkpoints/{name}/params.pt')
-
+        torch.save(vars(args), f'checkpoints/{name}/params.pt')
     else:
         patience_counter += 1
     
