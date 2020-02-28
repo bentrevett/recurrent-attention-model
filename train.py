@@ -21,6 +21,7 @@ parser.add_argument('--data', type=str, default='MNIST')
 parser.add_argument('--translated_size', type=int, default=None)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--n_epochs', type=int, default=250)
+parser.add_argument('--patience', type=int, default=10)
 parser.add_argument('--train_rollouts', type=int, default=1)
 parser.add_argument('--test_rollouts', type=int, default=10)
 parser.add_argument('--seed', type=int, default=None)
@@ -46,7 +47,15 @@ if args.seed is None:
 name = f'{args.data}'
 if args.translated_size is not None:
     name += f'-ts{args.translated_size}'
-name += f'-ng{args.n_glimpses}-ps{args.patch_size}-np{args.n_patches}-s{args.seed}'
+name += f'-ng{args.n_glimpses}-ps{args.patch_size}-np{args.n_patches}-sc{args.scale}-sd{args.std}-se{args.seed}'
+
+os.makedirs(f'checkpoints/{name}/', exist_ok=True)
+
+with open(f'checkpoints/{name}/train_results.txt', 'w+') as f:
+    f.write(f'accuracy\tloss\tclassifier_loss\tbaseline_loss\treinforce_loss\n')
+
+with open(f'checkpoints/{name}/test_results.txt', 'w+') as f:
+    f.write(f'accuracy\tloss\tclassifier_loss\tbaseline_loss\treinforce_loss\n')
 
 print(vars(args))
 
@@ -230,6 +239,7 @@ def sample_glimpses(model, iterator, device):
 
         return images, predictions, locations 
 
+patience_counter = 0
 best_test_loss = float('inf')
 
 for epoch in range(1, args.n_epochs+1):
@@ -240,6 +250,9 @@ for epoch in range(1, args.n_epochs+1):
     print(f'Losses: {loss:.2f} / {classifier_loss:.2f} / {baseline_loss:.2f} / {reinforce_loss:.2f}')
     print(f'Accuracy: {accuracy*100:.2f}%')
     
+    with open(f'checkpoints/{name}/train_results.txt', 'a+') as f:
+        f.write(f'{accuracy}\t{loss}\t{classifier_loss}\t{baseline_loss}\t{reinforce_loss}\n')
+
     with torch.no_grad():
         classifier_loss, baseline_loss, reinforce_loss, loss, accuracy = evaluate(model, test_iterator, args.test_rollouts, device)
     
@@ -247,14 +260,23 @@ for epoch in range(1, args.n_epochs+1):
     print(f'Losses: {loss:.2f} / {classifier_loss:.2f} / {baseline_loss:.2f} / {reinforce_loss:.2f}')
     print(f'Accuracy: {accuracy*100:.2f}%')
 
+    with open(f'checkpoints/{name}/test_results.txt', 'a+') as f:
+        f.write(f'{accuracy}\t{loss}\t{classifier_loss}\t{baseline_loss}\t{reinforce_loss}\n')
+
     if loss < best_test_loss:
+        patience_counter = 0
         best_test_loss = loss
-        torch.save(model.state_dict(), f'checkpoints/{name}-model.pt')
+        torch.save(model.state_dict(), f'checkpoints/{name}/model.pt')
         images, predictions, locations = sample_glimpses(model, test_iterator, device)
-        torch.save(images, f'checkpoints/{name}-images.pt')
-        torch.save(predictions, f'checkpoints/{name}-predictions.pt')
-        torch.save(locations, f'checkpoints/{name}-locations.pt')
-        params = {'patch_size': args.patch_size, 
-                  'n_patches': args.n_patches,
-                  'scale': args.scale}
-        torch.save(params, f'checkpoints/{name}-params.pt')
+        torch.save(images, f'checkpoints/{name}/images.pt')
+        torch.save(predictions, f'checkpoints/{name}/predictions.pt')
+        torch.save(locations, f'checkpoints/{name}/locations.pt')
+        params = vars(args)
+        torch.save(params, f'checkpoints/{name}/params.pt')
+
+    else:
+        patience_counter += 1
+    
+    if patience_counter >= args.patience:
+        print('Lost patience!')
+        break
