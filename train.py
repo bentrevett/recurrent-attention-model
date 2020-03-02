@@ -19,6 +19,8 @@ parser = argparse.ArgumentParser()
 # training set-up
 parser.add_argument('--data', type=str, default='MNIST')
 parser.add_argument('--translated_size', type=int, default=None)
+parser.add_argument('--n_clutter', type=int, default=None)
+parser.add_argument('--clutter_size', type=int, default=8)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--n_epochs', type=int, default=250)
 parser.add_argument('--patience', type=int, default=10)
@@ -41,12 +43,17 @@ parser.add_argument('--lr', type=float, default=3e-4)
 
 args = parser.parse_args()
 
+if args.n_clutter is not None:
+    assert args.translated_size is not None, 'must specify translated size if using clutter'
+
 if args.seed is None:
     args.seed = random.randint(0, 1000)
 
 name = f'{args.data}'
 if args.translated_size is not None:
     name += f'-ts{args.translated_size}'
+    if args.n_clutter is not None:
+        name += f'-nc{args.n_clutter}-cs{args.clutter_size}'
 name += f'-ng{args.n_glimpses}-ps{args.patch_size}-np{args.n_patches}-sc{args.scale}-sd{args.std}-se{args.seed}'
 
 os.makedirs(f'checkpoints/{name}/', exist_ok=True)
@@ -65,7 +72,10 @@ np.random.seed(args.seed)
 
 if args.data in {'MNIST', 'KMNIST', 'FashionMNIST'}:
     if args.translated_size is not None:
-        train_iterator, test_iterator = data_loader.get_translated_data(args.data, args.translated_size, args.batch_size)
+        if args.n_clutter is not None:
+            train_iterator, test_iterator = data_loader.get_cluttered_data(args.data, args.translated_size, args.n_clutter, args.clutter_size, args.batch_size)
+        else:
+            train_iterator, test_iterator = data_loader.get_translated_data(args.data, args.translated_size, args.batch_size)
     else:
         train_iterator, test_iterator = data_loader.get_data(args.data, args.batch_size)
     n_channels = 1
@@ -98,7 +108,7 @@ def count_parameters(model):
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
 def train(model, iterator, optimizer, n_rollouts, device):
-    
+
     model.train()
 
     epoch_classifier_loss = 0
@@ -136,7 +146,7 @@ def train(model, iterator, optimizer, n_rollouts, device):
         baseline_loss = F.mse_loss(baseline.squeeze(-1), rewards)
 
         advantage = rewards - baseline.squeeze(-1).detach()
-        
+
         reinforce_loss = torch.sum(-log_location_actions * advantage, dim=1)
         reinforce_loss = torch.mean(reinforce_loss, dim=0)
 
@@ -146,7 +156,7 @@ def train(model, iterator, optimizer, n_rollouts, device):
 
         optimizer.step()
 
-        correct = (predictions == labels).float() 
+        correct = (predictions == labels).float()
         accuracy = correct.sum() / labels.shape[0]
 
         epoch_classifier_loss += classifier_loss.item()
@@ -161,7 +171,7 @@ def train(model, iterator, optimizer, n_rollouts, device):
     epoch_loss /= len(iterator)
     epoch_accuracy /= len(iterator)
 
-    return epoch_classifier_loss , epoch_baseline_loss, epoch_reinforce_loss, epoch_loss, epoch_accuracy
+    return epoch_classifier_loss, epoch_baseline_loss, epoch_reinforce_loss, epoch_loss, epoch_accuracy
 
 def evaluate(model, iterator, n_rollouts, device):
 
@@ -200,13 +210,13 @@ def evaluate(model, iterator, n_rollouts, device):
         baseline_loss = F.mse_loss(baseline.squeeze(-1), rewards)
 
         advantage = rewards - baseline.squeeze(-1).detach()
-        
+
         reinforce_loss = torch.sum(-log_location_actions * advantage, dim=1)
         reinforce_loss = torch.mean(reinforce_loss, dim=0)
 
         loss = classifier_loss + baseline_loss + reinforce_loss
 
-        correct = (predictions == labels).float() 
+        correct = (predictions == labels).float()
         accuracy = correct.sum() / labels.shape[0]
 
         epoch_classifier_loss += classifier_loss.item()
@@ -221,7 +231,7 @@ def evaluate(model, iterator, n_rollouts, device):
     epoch_loss /= len(iterator)
     epoch_accuracy /= len(iterator)
 
-    return epoch_classifier_loss , epoch_baseline_loss, epoch_reinforce_loss, epoch_loss, epoch_accuracy
+    return epoch_classifier_loss, epoch_baseline_loss, epoch_reinforce_loss, epoch_loss, epoch_accuracy
 
 def sample_glimpses(model, iterator, device):
 
@@ -237,7 +247,7 @@ def sample_glimpses(model, iterator, device):
 
         predictions = torch.argmax(log_classifier_actions, dim=-1)
 
-        return images, predictions, locations 
+        return images, predictions, locations
 
 patience_counter = 0
 best_test_accuracy = 0
@@ -245,17 +255,17 @@ best_test_accuracy = 0
 for epoch in range(1, args.n_epochs+1):
 
     classifier_loss, baseline_loss, reinforce_loss, loss, accuracy = train(model, train_iterator, optimizer, args.train_rollouts, device)
-    
+
     print(f'Train Metrics, {epoch}:')
     print(f'Losses: {loss:.2f} / {classifier_loss:.2f} / {baseline_loss:.2f} / {reinforce_loss:.2f}')
     print(f'Accuracy: {accuracy*100:.2f}%')
-    
+
     with open(f'checkpoints/{name}/train_results.txt', 'a+') as f:
         f.write(f'{accuracy}\t{loss}\t{classifier_loss}\t{baseline_loss}\t{reinforce_loss}\n')
 
     with torch.no_grad():
         classifier_loss, baseline_loss, reinforce_loss, loss, accuracy = evaluate(model, test_iterator, args.test_rollouts, device)
-    
+
     print(f'Test Metrics, {epoch}:')
     print(f'Losses: {loss:.2f} / {classifier_loss:.2f} / {baseline_loss:.2f} / {reinforce_loss:.2f}')
     print(f'Accuracy: {accuracy*100:.2f}%')
@@ -274,7 +284,7 @@ for epoch in range(1, args.n_epochs+1):
         torch.save(vars(args), f'checkpoints/{name}/params.pt')
     else:
         patience_counter += 1
-    
+
     if patience_counter >= args.patience:
         print('Lost patience!')
         break
