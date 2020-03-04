@@ -15,19 +15,21 @@ def save_images(images, labels, name):
 
     # Create figure with sub-plots.
     fig, axes = plt.subplots(1, 5)
-    fig.tight_layout(pad=0.1)
+    plt.subplots_adjust(top = 1, bottom = 0, right = 1, left = 0, 
+                hspace = 0, wspace = 0.1)
+
 
     for i, ax in enumerate(axes.flat):
         # plot the image
         ax.imshow(images[i], cmap="Greys_r")
 
-        xlabel = f'{labels[i]}'
-        ax.set_xlabel(xlabel)
+        #xlabel = f'{labels[i]}'
+        #ax.set_xlabel(xlabel)
         ax.set_xticks([])
         ax.set_yticks([])
 
     # save image
-    fig.savefig(name)
+    fig.savefig(name, bbox_inches = 'tight')
 
 data = 'MNIST'
 batch_size = 5
