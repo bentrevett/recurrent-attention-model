@@ -1,21 +1,20 @@
 import torch
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
+import data_loader
 from modules.glimpse_sensor import GlimpseSensor
 
 def save_images(images, labels, name):
 
-    assert len(images) == len(labels) == 25
+    assert len(images) == len(labels) == 5
 
     # get rid of channel dimension of 1, if exists
     images = images.squeeze()
 
     # Create figure with sub-plots.
-    fig, axes = plt.subplots(5, 5)
+    fig, axes = plt.subplots(1, 5)
     fig.tight_layout(pad=0.1)
 
     for i, ax in enumerate(axes.flat):
@@ -27,40 +26,16 @@ def save_images(images, labels, name):
         ax.set_xticks([])
         ax.set_yticks([])
 
-    #save image
+    # save image
     fig.savefig(name)
 
-root = 'data'
-
-# get data
-data = datasets.MNIST(root=root, 
-                      train=True, 
-                      download=True)
-
-# calculate mean and std
-mean = data.data.float().mean() / 255
-std = data.data.float().std() / 255
-
-# define transforms
-transforms = transforms.Compose([
-                           transforms.ToTensor(),
-                           transforms.Normalize(mean=[mean], 
-                                                std=[std])
-                       ])
-
-# get data w/ transforms
-data = datasets.MNIST(root=root, 
-                      train=True, 
-                      download=True,
-                      transform=transforms)
-
-# get data loader
-batch_size = 25
-data_loader = torch.utils.data.DataLoader(data, batch_size=batch_size)
+data = 'MNIST'
+batch_size = 5
+train_data, test_data = data_loader.get_data(data, batch_size)
 
 # get batch 
-data_iter = iter(data_loader)
-images, labels = data_iter.next()
+test_iter = iter(test_data)
+images, labels = test_iter.next()
 
 # plot raw images
 os.makedirs('images', exist_ok=True)

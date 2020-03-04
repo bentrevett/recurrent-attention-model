@@ -36,7 +36,7 @@ parser.add_argument('--scale', type=int, default=2)
 parser.add_argument('--glimpse_hid_dim', type=int, default=128)
 parser.add_argument('--location_hid_dim', type=int, default=128)
 parser.add_argument('--recurrent_hid_dim', type=int, default=256)
-parser.add_argument('--std', type=float, default=0.17)
+parser.add_argument('--std', type=float, default=0.15)
 
 # other hyperparameters
 parser.add_argument('--lr', type=float, default=3e-4)
