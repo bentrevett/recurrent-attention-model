@@ -92,9 +92,9 @@ The models have not been subject to an extensive hyperparameter search so, in th
 | Experiment | Paper | This Repo. |
 |------------|-------|------------|
 | 28x28 MNIST w/ 6 Glimpses, 8x8, 1 scale | 1.29% | 1.08% w/ std = 0.15 |
-| 60x60 Translated MNIST w/ 8 Glimpses, 12x12, 3 scales | 1.84% | 1.87% w/ std = 0.25|
+| 60x60 Translated MNIST w/ 8 Glimpses, 12x12, 3 scales | 1.84% | 1.87% w/ std = 0.25 |
 | 60x60 Translated Cluttered MNIST w/ 8 Glimpses, 12x12, 3 scales | 5.23% | 2.13% w/ std = 0.25 |
-| 100x100 Translated Cluttered MNIST w/ 8 Glimpses, 12x12, 4 scales | 10.83% | 6.74% |
+| 100x100 Translated Cluttered MNIST w/ 8 Glimpses, 12x12, 4 scales | 10.83% | 6.74% w/ std = 0.25 |
 
 <p>
 
